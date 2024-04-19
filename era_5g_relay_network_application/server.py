@@ -361,7 +361,12 @@ class RelayServer(NetworkApplicationServer):
             if args:
                 sr = args.get("subscribe_results")
                 if sr:
-                    self.result_subscribers.add(self.get_sid_of_data(self.get_eio_sid_of_control(sid)))
+                    sid = self.get_sid_of_data(self.get_eio_sid_of_control(sid))
+                    self.result_subscribers.add(sid)
+                    for topic_out in self.topics_outgoing.values():
+                        if topic_out.worker.memory is not None:
+                            for msg in topic_out.worker.memory:
+                                self.send_data_with_sid((sid, msg), topic_out.channel_name)
         return True, ""
 
     def disconnect_callback(self, eio_sid):
@@ -413,7 +418,7 @@ def main(args=None) -> None:
     topics_incoming_list = load_entities_list("TOPICS_FROM_CLIENT")  # Topics that are received from the client
     services_incoming_list = load_entities_list("SERVICES_FROM_CLIENT")  # Services that are called from the client
     actions_to_provide = load_entities_list("ACTIONS_FROM_CLIENT")  # Actions provided by this server to the client
-    transforms_to_listen = load_transform_list("TRANSFORMS_FROM_CLIENT")  # TFs that are received from the client
+    transforms_to_listen = load_transform_list("TRANSFORMS_TO_CLIENT")  # TFs that should be send to the client
 
     rclpy.init(args=args)
     node = rclpy.create_node("relay_netapp")
