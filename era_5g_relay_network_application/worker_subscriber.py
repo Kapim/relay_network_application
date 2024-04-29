@@ -1,11 +1,12 @@
 import time
+from collections import deque
 from queue import Full
-from typing import Any, Optional
+from typing import Any, Deque, Optional
 
 import DracoPy
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup  # pants: no-infer-dep
 from rclpy.node import Node  # pants: no-infer-dep
-from rclpy.qos import QoSProfile  # pants: no-infer-dep
+from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile  # pants: no-infer-dep
 from rosbridge_library.internal import ros_loader  # pants: no-infer-dep
 from rosbridge_library.internal.message_conversion import extract_values  # pants: no-infer-dep
 from sensor_msgs.msg import PointCloud2  # pants: no-infer-dep
@@ -74,6 +75,14 @@ class WorkerSubscriber:
         self.queue = queue
         self.action_topic_variant = action_topic_variant
         self.action_subscribers = action_subscribers
+        self.memory: Optional[Deque[Any]] = None
+        if qos and qos.durability == DurabilityPolicy.TRANSIENT_LOCAL:
+            if qos.history == HistoryPolicy.KEEP_ALL:
+                self.node.get_logger().debug(f"Latched topic {self.topic_name} with infinite depth")
+                self.memory = deque()
+            else:
+                self.node.get_logger().debug(f"Latched topic {self.topic_name} with depth: {qos.depth}")
+                self.memory = deque(maxlen=qos.depth)
 
         # each topic has its own group
         # callbacks for different topics can overlap
@@ -125,16 +134,16 @@ class WorkerSubscriber:
             np_arr = read_points_numpy(data, field_names=["x", "y", "z"], skip_nans=True)  # drop intensity, etc....
             cpc = DracoPy.encode(np_arr, compression_level=1)
             msg["data"] = cpc
-
         try:
             if self.action_topic_variant == ActionTopicVariant.ACTION_FEEDBACK:
                 # Send action feedback only to the client that sent the corresponding action goal
                 goal_uuid = msg["goal_id"]["uuid"]
                 assert self.action_subscribers is not None  # prevents mypy error
                 sid = self.action_subscribers.get_sid_for_goal_id(goal_uuid)
-
                 self.queue.put_nowait((sid, msg))
             else:
+                if self.memory is not None:
+                    self.memory.append(msg)
                 self.queue.put_nowait(msg)
 
         except Full:

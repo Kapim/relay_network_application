@@ -1,6 +1,6 @@
 import time
 from queue import Full
-from typing import Any, Optional
+from typing import Any, Deque, Optional
 
 from cv_bridge import CvBridge  # pants: no-infer-dep
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup  # pants: no-infer-dep
@@ -63,6 +63,7 @@ class WorkerImageSubscriber:
         self.topic_name = topic_name
         self.topic_type = topic_type
         self.bridge = CvBridge()
+        self.memory: Optional[Deque[Any]] = None  # compatibility reasons
 
         self._extended_measuring = extended_measuring
         self._measuring = Measuring(

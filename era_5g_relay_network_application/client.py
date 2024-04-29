@@ -3,7 +3,7 @@ import os
 import sys
 from functools import partial
 from queue import Full, Queue
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import rclpy  # pants: no-infer-dep
 from cv_bridge import CvBridge  # pants: no-infer-dep
@@ -343,9 +343,9 @@ def main(args=None) -> None:
         for topic_out in topics_outgoing_list:
             subscriber_queue: Queue = Queue(QUEUE_LENGTH_TOPICS)
             channel_type = get_channel_type(topic_out.compression, topic_out.type)
-
+            w: Union[WorkerImageSubscriber, WorkerSubscriber]
             if channel_type in IMAGE_CHANNEL_TYPES:
-                WorkerImageSubscriber(
+                w = WorkerImageSubscriber(
                     topic_out.name,
                     topic_out.type,
                     node,
@@ -361,7 +361,7 @@ def main(args=None) -> None:
                     can_be_dropped=True,
                 )
             else:
-                WorkerSubscriber(
+                w = WorkerSubscriber(
                     topic_out.name,
                     topic_out.type,
                     node,
@@ -374,6 +374,9 @@ def main(args=None) -> None:
                     client.send_data, event=f"topic/{topic_out.name}", channel_type=channel_type, can_be_dropped=True
                 )
 
+            if w.memory is not None:
+                for msg in w.memory:
+                    send_function(msg)
             worker_socketio = WorkerSocketIO(subscriber_queue, send_function)
             worker_socketio.daemon = True
             worker_socketio.start()
