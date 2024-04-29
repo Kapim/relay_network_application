@@ -17,6 +17,7 @@
 //     "numpy>=1.24.4",
 //     "opencv-python>=4.7",
 //     "pytest>=8.0.2",
+//     "python-socketio[client]>=5.11.1",
 //     "rospkg"
 //   ],
 //   "manylinux": "manylinux2014",
@@ -1950,6 +1951,7 @@
     "numpy>=1.24.4",
     "opencv-python>=4.7",
     "pytest>=8.0.2",
+    "python-socketio[client]>=5.11.1",
     "rospkg"
   ],
   "requires_python": [
