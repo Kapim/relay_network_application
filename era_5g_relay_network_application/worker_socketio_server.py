@@ -1,5 +1,8 @@
+import logging
 from multiprocessing.queues import Queue
 from typing import Any, Optional
+
+from socketio.exceptions import BadNamespaceError
 
 from era_5g_interface.exceptions import BackPressureException
 from era_5g_relay_network_application import SendFunctionProtocol
@@ -20,4 +23,6 @@ class WorkerSocketIOServer(WorkerSocketIO):
             try:
                 self.send_function(data, sid=s)
             except BackPressureException:
-                print("apply backpressure")
+                logging.warning("Backpressure applied.")
+            except BadNamespaceError:
+                logging.warning("Trying to send data while not connected to the network application")
