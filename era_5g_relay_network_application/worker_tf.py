@@ -29,4 +29,4 @@ class WorkerTF:
             try:
                 self.queue.put_nowait(extract_values(TFMessage(transforms=transforms)))
             except Full:
-                pass
+                self.node.get_logger().debug("TF worker: full queue")

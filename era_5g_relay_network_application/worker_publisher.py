@@ -70,7 +70,7 @@ class WorkerPublisher(Thread):
 
             # Status topic must have different qos profile
             # This is necessary for action to be recognized as being available by wait_for_server() call
-            qos = QoSProfile(durability=QoSDurabilityPolicy.RMW_QOS_POLICY_DURABILITY_TRANSIENT_LOCAL, depth=10)
+            qos = QoSProfile(durability=QoSDurabilityPolicy.TRANSIENT_LOCAL, depth=10)
 
         # Create publisher
         self.pub = node.create_publisher(self.topic_type_class, self.topic_name, qos if qos is not None else 10)
