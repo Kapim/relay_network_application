@@ -86,7 +86,7 @@ class WorkerImageSubscriber:
         try:
             self.queue.put_nowait((timestamp, cv_image))
         except Full:
-            pass
+            self.node.get_logger().warning(f"{self.topic_name} worker image subs: queue full!")
         self._measuring.log_measuring(timestamp, "before_callback_timestamp", before_callback_timestamp)
         self._measuring.log_timestamp(timestamp, "after_callback_timestamp")
         self._measuring.store_measuring(timestamp)

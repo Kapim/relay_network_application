@@ -17,7 +17,7 @@ from era_5g_client.client_base import NetAppClientBase
 from era_5g_client.dataclasses import MiddlewareInfo
 from era_5g_client.exceptions import FailedToConnect
 from era_5g_interface.channels import CallbackInfoClient, Channels, ChannelType
-from era_5g_relay_network_application import SendFunctionProtocol
+from era_5g_relay_network_application import SendFunctionProtocol, can_be_dropped_from_qos, queue_len_from_qos
 from era_5g_relay_network_application.utils import (
     IMAGE_CHANNEL_TYPES,
     ActionServiceVariant,
@@ -68,7 +68,6 @@ MIDDLEWARE_ROBOT_ID = os.getenv("MIDDLEWARE_ROBOT_ID", "00000000-0000-0000-0000-
 USE_SIM_TIME = os.getenv("USE_SIM_TIME", "false").lower() in ("true", "1", "t")
 
 QUEUE_LENGTH_TOPICS = int(os.getenv("QUEUE_LENGTH_TOPICS", 1))
-QUEUE_LENGTH_SERVICES = int(os.getenv("QUEUE_LENGTH_SERVICES", 1))
 QUEUE_LENGTH_TF = int(os.getenv("QUEUE_LENGTH_TF", 1))
 
 EXTENDED_MEASURING = bool(os.getenv("EXTENDED_MEASURING", False))
@@ -98,10 +97,12 @@ def json_callback(data: Dict, queue: Queue):
         queue (Queue):  The queue to pass the data to the publisher.
     """
 
+    assert node
+
     try:
         queue.put_nowait((data, Channels.get_timestamp_from_data(data)))
     except Full:
-        return
+        node.get_logger().warning("client: JSON queue full!")
 
 
 def image_callback(data: Dict[str, Any], queue: Queue):
@@ -113,10 +114,12 @@ def image_callback(data: Dict[str, Any], queue: Queue):
         queue (Queue): The queue to pass the data to the publisher.
     """
 
+    assert node
+
     try:
         queue.put_nowait((data["frame"], data["timestamp"]))
     except Full:
-        return
+        node.get_logger().warning("client: image queue full!")
 
 
 def service_callback(data: Dict[str, Any], response_queue: Queue):
@@ -127,10 +130,12 @@ def service_callback(data: Dict[str, Any], response_queue: Queue):
         response_queue (Queue): The queue to pass the data to the service server.
     """
 
+    assert node
+
     try:
         response_queue.put_nowait(data)
     except Full:
-        return
+        node.get_logger().warning("client: service response queue full!")
 
 
 def send_image(data: Tuple, event: str, client: NetAppClientBase, channel_type: ChannelType, can_be_dropped=False):
@@ -160,8 +165,8 @@ def create_service_server(
 
     global services_workers
 
-    request_q: Queue = Queue(QUEUE_LENGTH_SERVICES)
-    response_q: Queue = Queue(QUEUE_LENGTH_SERVICES)
+    request_q: Queue = Queue(1)
+    response_q: Queue = Queue(1)
     service_worker = WorkerServiceServer(
         service_name, service_type, request_q, response_q, node, qos, action_service_variant
     )
@@ -266,7 +271,7 @@ def main(args=None) -> None:
     callbacks_info = dict()
     # Create publishers and collect callbacks info for all topics to be received from the relay server
     for topic_in in topics_incoming_list:
-        queue: Queue = Queue(QUEUE_LENGTH_TOPICS)
+        queue: Queue = Queue(queue_len_from_qos(QUEUE_LENGTH_TOPICS, topic_in.qos))
         channel_type = get_channel_type(topic_in.compression, topic_in.type)
         worker: WorkerPublisher
         if channel_type in IMAGE_CHANNEL_TYPES:
@@ -341,9 +346,12 @@ def main(args=None) -> None:
 
         # create socketio workers for all topics and services to be sent to the relay server
         for topic_out in topics_outgoing_list:
-            subscriber_queue: Queue = Queue(QUEUE_LENGTH_TOPICS)
+            subscriber_queue: Queue = Queue(queue_len_from_qos(QUEUE_LENGTH_TOPICS, topic_out.qos))
             channel_type = get_channel_type(topic_out.compression, topic_out.type)
             w: Union[WorkerImageSubscriber, WorkerSubscriber]
+
+            can_be_dropped = can_be_dropped_from_qos(topic_out.qos)
+
             if channel_type in IMAGE_CHANNEL_TYPES:
                 w = WorkerImageSubscriber(
                     topic_out.name,
@@ -358,7 +366,7 @@ def main(args=None) -> None:
                     event=f"topic/{topic_out.name}",
                     client=client,
                     channel_type=channel_type,
-                    can_be_dropped=True,
+                    can_be_dropped=can_be_dropped,
                 )
             else:
                 w = WorkerSubscriber(
@@ -371,7 +379,10 @@ def main(args=None) -> None:
                     extended_measuring=EXTENDED_MEASURING,
                 )
                 send_function: SendFunctionProtocol = partial(  # type: ignore  # deals with "name already defined"
-                    client.send_data, event=f"topic/{topic_out.name}", channel_type=channel_type, can_be_dropped=True
+                    client.send_data,
+                    event=f"topic/{topic_out.name}",
+                    channel_type=channel_type,
+                    can_be_dropped=can_be_dropped,
                 )
 
             if w.memory is not None:

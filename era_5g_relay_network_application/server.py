@@ -14,6 +14,7 @@ from rclpy.qos import QoSProfile  # pants: no-infer-dep
 from era_5g_interface.channels import CallbackInfoServer, Channels, ChannelType
 from era_5g_interface.dataclasses.control_command import ControlCmdType, ControlCommand
 from era_5g_interface.utils.locked_set import LockedSet
+from era_5g_relay_network_application import can_be_dropped_from_qos, queue_len_from_qos
 from era_5g_relay_network_application.utils import (
     IMAGE_CHANNEL_TYPES,
     ActionServiceVariant,
@@ -42,7 +43,6 @@ logger = logging.getLogger("relay server python")
 NETAPP_PORT = int(os.getenv("NETAPP_PORT", 5896))
 
 QUEUE_LENGTH_TOPICS = int(os.getenv("QUEUE_LENGTH_TOPICS", 1))
-QUEUE_LENGTH_SERVICES = int(os.getenv("QUEUE_LENGTH_SERVICES", 1))
 QUEUE_LENGTH_TF = int(os.getenv("QUEUE_LENGTH_TF", 1))
 USE_SIM_TIME = os.getenv("USE_SIM_TIME", "false").lower() in ("true", "1", "t")
 EXTENDED_MEASURING = bool(os.getenv("EXTENDED_MEASURING", False))
@@ -65,7 +65,7 @@ class RelayTopic:
         self.qos = qos
         self.channel_type = channel_type
         self.channel_name = f"topic/{self.topic_name}"
-        self.queue: Queue[Any] = Queue(QUEUE_LENGTH_TOPICS)
+        self.queue: Queue[Any] = Queue(queue_len_from_qos(QUEUE_LENGTH_TOPICS, self.qos))
 
 
 class RelayTopicIncoming(RelayTopic):
@@ -167,8 +167,8 @@ class RelayService:
     ):
         self.service_type = service_type
 
-        self.queue_request: Queue[ServiceData] = Queue(QUEUE_LENGTH_SERVICES)
-        self.queue_response: Queue[ServiceData] = Queue(QUEUE_LENGTH_SERVICES)
+        self.queue_request: Queue[ServiceData] = Queue(1)
+        self.queue_response: Queue[ServiceData] = Queue(1)
 
         self.worker = WorkerService(
             service_name,
@@ -240,19 +240,21 @@ class RelayServer(NetworkApplicationServer):
 
         # collects info about topics that are subscribed to be sent to the relay client
         for topic_out in topics_outgoing.values():
+            can_be_dropped = can_be_dropped_from_qos(topic_out.qos)
+
             if topic_out.channel_type in [ChannelType.JSON, ChannelType.JSON_LZ4]:
                 send_function = partial(
                     self.send_data,
                     event=topic_out.channel_name,
                     channel_type=topic_out.channel_type,
-                    can_be_dropped=True,
+                    can_be_dropped=can_be_dropped,
                 )
             else:
                 send_function = partial(
                     self.send_image_data,
                     event=topic_out.channel_name,
                     channel_type=topic_out.channel_type,
-                    can_be_dropped=True,
+                    can_be_dropped=can_be_dropped,
                 )
 
             if topic_out.action_topic_variant == ActionTopicVariant.ACTION_FEEDBACK:
@@ -316,7 +318,7 @@ class RelayServer(NetworkApplicationServer):
         try:
             queue.put_nowait((data["frame"], data["timestamp"]))
         except Full:
-            pass
+            logger.warning("image queue full")
 
     def json_callback(self, sid: str, data: Dict, queue: Queue):
         """Allows to receive json data using the websocket transport.
@@ -329,7 +331,7 @@ class RelayServer(NetworkApplicationServer):
         try:
             queue.put_nowait((data, Channels.get_timestamp_from_data(data)))
         except Full:
-            pass
+            logger.warning("JSON queue full")
 
     def service_callback(self, sid: str, data: Dict, queue: Queue):
         """Allows to receive service request using the websocket transport.
@@ -343,7 +345,7 @@ class RelayServer(NetworkApplicationServer):
         try:
             queue.put_nowait((sid, data))
         except Full:
-            pass
+            logger.warning("service queue full")
 
     def command_callback(self, command: ControlCommand, sid: str) -> Tuple[bool, str]:
         """Processes the received control command.

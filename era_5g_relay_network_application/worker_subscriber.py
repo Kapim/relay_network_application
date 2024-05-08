@@ -147,7 +147,8 @@ class WorkerSubscriber:
                 self.queue.put_nowait(msg)
 
         except Full:
-            pass
+            self.node.get_logger().debug(f"{self.topic_name} worker: full queue")
+
         self._measuring.log_measuring(timestamp, "before_callback_timestamp", before_callback_timestamp)
         self._measuring.log_timestamp(timestamp, "after_callback_timestamp")
         self._measuring.store_measuring(timestamp)
